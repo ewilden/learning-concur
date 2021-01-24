@@ -1,0 +1,13 @@
+{
+  "purescript.buildCommand": "spago build --purs-args '-o .spago2 --json-errors'",
+  "purescript.outputDirectory": ".spago2/",
+  "editor.formatOnSave": true,
+  "emeraldwalk.runonsave": {
+    "commands": [
+      {
+        "match": ".*",
+        "cmd": "npm run build",
+      }
+    ]
+  }
+}

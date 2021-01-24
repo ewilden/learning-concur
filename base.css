@@ -1,0 +1,22 @@
+.board {
+  display: grid;
+  /* grid-template-columns: repeat(); */
+}
+
+.spot {
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.tile {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  grid-template-areas: ". u ." "l center r" ". d .";
+  justify-content: stretch;
+  align-items: stretch;
+  align-content: stretch;
+  justify-items: stretch;
+  flex: 1 1;
+}
