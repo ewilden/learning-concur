@@ -1,14 +1,15 @@
 module Main where
 
+import Control.Monad.Gen
 import Data.FoldableWithIndex
 import Data.Interpolate
 import Data.Map
 import Data.Maybe
+import Data.Newtype
 import Data.Tuple
 import Data.Variant
 import Prelude
 import Prim.Row
-
 import Concur.Core (Widget)
 import Concur.React (HTML)
 import Concur.React.DOM as D
@@ -16,51 +17,36 @@ import Concur.React.Props as P
 import Concur.React.Run (runWidgetInDom)
 import Control.MultiAlternative (orr)
 import Data.Array ((..), zipWith)
+import Data.Enum (class BoundedEnum, Cardinality(..), cardinality, toEnum)
 import Data.Map as M
 import Data.Symbol (class IsSymbol)
 import Effect (Effect)
 import Type.Row (class Union, type (+))
 import Unsafe.Coerce (unsafeCoerce)
+import Types
 
-_road = SProxy :: SProxy "road"
-_city = SProxy :: SProxy "city"
-_field = SProxy :: SProxy "field"
-_monastery = SProxy :: SProxy "monastery"
+chooseBoundedEnum :: forall m a. BoundedEnum a => MonadGen m => m a
+chooseBoundedEnum = case (cardinality :: Cardinality a) of
+  Cardinality n -> do
+    x <- chooseInt 0 (n - 1)
+    case toEnum x of
+      Just a -> pure a
+      Nothing -> chooseBoundedEnum
 
-inju :: forall a b c. Cons c Unit b a => IsSymbol c => SProxy c -> Variant a
-inju x = inj x unit
-
-type CommonTerrainTypes a r = (city :: a, field :: a | r)
-
-type SideTerrainTypes a r = (road :: a | r)
-type MiddleTerrainTypes a r = (monastery :: a | r)
-type AllTerrainTypes a r = (MiddleTerrainTypes a + SideTerrainTypes a + CommonTerrainTypes a + r)
-
-type SideTerrain = Variant (SideTerrainTypes Unit + CommonTerrainTypes Unit + ())
-type MiddleTerrain = Variant (MiddleTerrainTypes Unit + CommonTerrainTypes Unit + ())
-type AnyTerrain = Variant (AllTerrainTypes Unit ())
-
-showTerrain :: AnyTerrain -> String
-showTerrain = match
-  { road: const "road", city: const "city", field: const "field", monastery: const "monastery"}
-
-newtype Tile = Tile TileInternal
-type TileInternal = {
-    sides :: Array SideTerrain,
-    middle :: MiddleTerrain
-  }
-
-unTile :: Tile -> TileInternal
-unTile (Tile t) = t
-
-instance showTile :: Show Tile where
-  show _ = "Tile"
+genTile :: forall m. MonadGen m => m Tile
+genTile = do
+  u <- chooseBoundedEnum
+  r <- chooseBoundedEnum
+  d <- chooseBoundedEnum
+  l <- chooseBoundedEnum
+  m <- chooseBoundedEnum
+  pure $ Tile { sides: [ u, r, d, l ], middle: m }
 
 type BoardSpot
   = { x :: Int, y :: Int }
 
 type Board
-  = Map (BoardSpot) Tile
+  = Map BoardSpot Tile
 
 type GameState
   = { board :: Board
@@ -83,43 +69,65 @@ computeBounds b =
     b
 
 startingTile :: Tile
-startingTile = Tile {
-              sides: [inju _city, inju _road, inju _field, inju _city], 
-              middle: inju _field
-              }
-
+startingTile =
+  Tile
+    { sides: [ inju _city, inju _road, inju _field, inju _road ]
+    , middle: inju _field
+    }
 
 startingState :: GameState
 startingState =
   { board: fromFoldable [ Tuple { x: 0, y: 0 } startingTile ]
   }
 
-renderTile :: {tileMay :: Maybe Tile, spot :: {x :: Int, y :: Int}} -> forall a. Widget HTML a
-renderTile {tileMay, spot: {x, y}} = 
-  D.div [P.className "tile"] $ case tileMay of
-    Nothing -> [D.div [P.style {gridArea: "center"}] [D.text "Nothing"]]
-    Just tile -> 
-      let renderSide terrain area = D.div [P.style {gridArea: area}] [D.text $ showTerrain (expand terrain)]
-      in  zipWith renderSide (unTile tile).sides ["u", "r", "d", "l"]
+renderTile :: forall r. { tileMay :: Maybe Tile | r } -> forall a. Widget HTML a
+renderTile { tileMay } =
+  D.div [ P.className "tile" ]
+    $ case tileMay of
+        Nothing -> [ D.div [ P.style { gridArea: "center" } ] [ D.text "Nothing" ] ]
+        Just tile ->
+          let
+            renderSide terrain area = D.div [ P.style { gridArea: area } ] [ D.div [] $ pure $ D.text $ showTerrain (expand terrain) ]
+          in
+            zipWith renderSide (unwrap tile).sides [ "u", "r", "d", "l" ]
 
 renderBoard :: GameState -> forall a. Widget HTML a
 renderBoard gs =
-  let {left, right, up, down} = computeBounds gs.board
-      xStart = left - 1
-      xEnd = right + 1
-      yStart = down - 1
-      yEnd = up + 1
-      mkSpot x y = {x, y}
-      spotsToRender :: Array BoardSpot
-      spotsToRender = mkSpot <$> (xStart .. xEnd) <*> (yStart .. yEnd)
-      renderSpot :: BoardSpot -> forall a. Widget HTML a
-      renderSpot spot@{x,y} = D.div [P.style { 
-        gridArea: i (yEnd - y + 1) "/" (x - xStart + 1) "/" (yEnd - y + 2) "/" (x - xStart + 2) :: String
-      }, P.className "spot"] [renderTile {spot, tileMay: M.lookup spot gs.board}]
-  in D.div [ P.className "board" , P.style {
-              gridTemplateColumns: i "repeat(" (xEnd - xStart + 1) ", " tileSize ")" :: String,
-              gridTemplateRows: i "repeat(" (yEnd - yStart + 1) ", " tileSize ")" :: String}]
-        $  spotsToRender <#> renderSpot
+  let
+    { left, right, up, down } = computeBounds gs.board
+
+    xStart = left - 1
+
+    xEnd = right + 1
+
+    yStart = down - 1
+
+    yEnd = up + 1
+
+    mkSpot x y = { x, y }
+
+    spotsToRender :: Array BoardSpot
+    spotsToRender = mkSpot <$> (xStart .. xEnd) <*> (yStart .. yEnd)
+
+    renderSpot :: BoardSpot -> forall a. Widget HTML a
+    renderSpot spot@{ x, y } =
+      D.div
+        [ P.style
+            { gridArea: i (yEnd - y + 1) "/" (x - xStart + 1) "/" (yEnd - y + 2) "/" (x - xStart + 2) :: String
+            }
+        , P.className "spot"
+        ]
+        [ renderTile { spot, tileMay: M.lookup spot gs.board } ]
+  in
+    D.div
+      [ P.className "board"
+      , P.style
+          { gridTemplateColumns: i "repeat(" (xEnd - xStart + 1) ", " tileSize ")" :: String
+          , gridTemplateRows: i "repeat(" (yEnd - yStart + 1) ", " tileSize ")" :: String
+          }
+      ]
+      $ spotsToRender
+      <#> renderSpot
 
 hello :: forall a. Widget HTML a
 hello = do

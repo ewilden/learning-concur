@@ -14,9 +14,9 @@
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
   grid-template-areas: ". u ." "l center r" ". d .";
-  justify-content: stretch;
-  align-items: stretch;
-  align-content: stretch;
-  justify-items: stretch;
+  justify-content: center;
+  justify-items: center;
+  align-content: center;
+  align-items: center;
   flex: 1 1;
 }
